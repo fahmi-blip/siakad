@@ -1,15 +1,80 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
 
 type Student struct {
-	ID        int       `json:"id"`
-	Nim       string    `json:"nim"`
-	Name      string    `json:"name"`
-	Grade     float64   `json:"grade"`
-	IsActive  bool      `json:"is_active"`
-	OwnerID   int       `json:"owner_id"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int                `json:"id"`
+	UserID      int                `json:"user_id"`
+	Nim         string             `json:"nim"`
+	Nama        string             `json:"nama"`
+	Prodi       string             `json:"prodi"`
+	Angkatan    int                `json:"angkatan"`
+	IpkTerakhir float64            `json:"ipk_terakhir"`
+	DeletedAt   pgtype.Timestamptz `json:"-"`
+	CreatedAt   time.Time          `json:"created_at,omitempty"`
+}
+
+type StudentDetailResponse struct {
+	ID          int          `json:"id"`
+	UserID      int          `json:"user_id"`
+	Nim         string       `json:"nim"`
+	Nama        string       `json:"nama"`
+	Prodi       string       `json:"prodi"`
+	Angkatan    int          `json:"angkatan"`
+	IpkTerakhir float64      `json:"ipk_terakhir"`
+	MataKuliah  []CourseItem `json:"mata_kuliah"`
+	TotalSKS    int          `json:"total_sks"`
+	BatasSKS    int          `json:"batas_sks"`
+	CreatedAt   time.Time    `json:"created_at,omitempty"`
+}
+
+type CourseItem struct {
+	ID            int    `json:"id"`
+	KodeMK        string `json:"kode_mk"`
+	NamaMK        string `json:"nama_mk"`
+	SKS           int    `json:"sks"`
+	Semester      int    `json:"semester"`
+	TahunAkademik string `json:"tahun_akademik,omitempty"`
+}
+
+type CreateStudentRequest struct {
+	Nim         string   `json:"nim" validate:"required,nim"`
+	Nama        string   `json:"nama" validate:"required,min=2,max=100"`
+	Email       string   `json:"email" validate:"required,email"`
+	Prodi       string   `json:"prodi" validate:"required,min=2,max=100"`
+	Angkatan    int      `json:"angkatan" validate:"required"`
+	IpkTerakhir *float64 `json:"ipk_terakhir" validate:"omitempty,gte=0,lte=4"`
+}
+
+type UpdateStudentRequest struct {
+	Nama        string   `json:"nama" validate:"required,min=2,max=100"`
+	Prodi       string   `json:"prodi" validate:"required,min=2,max=100"`
+	Angkatan    int      `json:"angkatan" validate:"required"`
+	IpkTerakhir *float64 `json:"ipk_terakhir" validate:"omitempty,gte=0,lte=4"`
+}
+
+type Meta struct {
+	CurrentPage int `json:"current_page"`
+	PerPage     int `json:"per_page"`
+	Total       int `json:"total"`
+	LastPage    int `json:"last_page"`
+}
+
+type StudentListQuery struct {
+	Page     int
+	PerPage  int
+	Prodi    string
+	Angkatan int
+	Search   string
+	Sort     string
+}
+
+func (q StudentListQuery) Offset() int {
+	return (q.Page - 1) * q.PerPage
 }
 
 type Prestation struct {
@@ -22,60 +87,4 @@ type Prestation struct {
 type StudentWithPrestation struct {
 	Student
 	Prestasi []Prestation `json:"prestasi"`
-}
-
-type CreatedStudentRequest struct {
-	Nim   string  `json:"nim" validate:"required,nim"`
-	Name  string  `json:"name" validate:"required,min=3,max=50"`
-	Grade float64 `json:"grade" validate:"required,min=0,max=100"`
-}
-
-type ReplaceStudentRequest struct {
-	Name     string  `json:"name" validate:"required,min=3,max=50"`
-	Grade    float64 `json:"grade" validate:"required,min=0,max=100"`
-	IsActive bool    `json:"is_active"`
-}
-
-type PatchStudentRequest struct {
-	Name     *string  `json:"name,omitempty" validate:"omitnil,min=3,max=50"`
-	Grade    *float64 `json:"grade,omitempty" validate:"omitnil,min=0,max=100"`
-	IsActive *bool    `json:"is_active,omitempty"`
-}
-
-type StudentCursorQuery struct {
-	Search   string
-	IsActive *bool
-	Limit    int
-	After    *Cursor
-}
-
-//Amplop baku untuk semua respon
-type WebResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
-	Meta    any    `json:"meta,omitempty"`
-	Errors  any    `json:"errors,omitempty"`
-}
-
-type Meta struct {
-	Page      int `json:"page"`
-	Limit     int `json:"limit"`
-	Total     int `json:"total"`
-	TotalPage int `json:"total_page"`
-}
-
-type ListQuery struct {
-	Page     int
-	Limit    int
-	Search   string
-	Sort     string
-	Order    string
-	IsActive *bool
-	MinGrade *float64
-	MaxGrade *float64
-}
-
-func (q ListQuery) Offset() int {
-	return (q.Page - 1) * q.Limit
 }
