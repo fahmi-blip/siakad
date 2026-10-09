@@ -1,346 +1,138 @@
-# API Students — Dokumentasi Kontrak API
+# SIAKAD Mini - RESTful API Backend
 
-**Base URL**: `http://localhost:3000/api/v1`
-
-
-## Skema Tabel
-
-Aplikasi ini memakai satu tabel: `students`.
-
-```sql
-CREATE TABLE IF NOT EXISTS students (
-    id          SERIAL          PRIMARY KEY,
-    nim         VARCHAR(20)     NOT NULL,
-    name        VARCHAR(50)     NOT NULL,
-    grade       NUMERIC(5,2)    NOT NULL,
-    is_active   BOOLEAN         NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
-);
-
--- Keunikan NIM dijaga di level basis data, bukan lewat pengecekan manual di kode.
-CREATE UNIQUE INDEX IF NOT EXISTS students_nim_key
-    ON students (nim);
-
--- Mempercepat pencarian nama lewat parameter ?search=, tidak membedakan huruf besar/kecil.
--- Bukan UNIQUE, karena dua mahasiswa berbeda boleh punya nama yang sama.
-CREATE INDEX IF NOT EXISTS students_name_lower_idx
-    ON students (LOWER(name));
-```
-
-| Kolom | Tipe | Keterangan |
-|---|---|---|
-| `id` | `SERIAL PRIMARY KEY` | Dibuat otomatis oleh database, tidak pernah dikirim klien |
-| `nim` | `VARCHAR(20)` | Kode identitas mahasiswa, wajib unik |
-| `name` | `VARCHAR(50)` | Nama mahasiswa |
-| `grade` | `NUMERIC(5,2)` | Nilai, rentang 0.00–100.00 |
-| `is_active` | `BOOLEAN` | Status keaktifan, default `TRUE` |
-| `created_at` | `TIMESTAMPTZ` | Waktu data dibuat, diisi otomatis oleh database |
+Layanan akademik sederhana **SIAKAD Mini** (RESTful API) yang dibangun menggunakan **Go**, **Fiber v2**, dan **PostgreSQL** (via `pgx v5`).
 
 ---
 
-## Cara Menyiapkan Basis Data dari Nol
-
-Panduan ini mengasumsikan PostgreSQL sudah terpasang di komputer, tapi database untuk proyek ini belum ada.
-
-**1. Buat database kosong**
-Buka terminal, lalu jalankan (sesuaikan `postgres` dengan nama user PostgreSQL anda bila berbeda):
-
-```bash
-psql -U postgres -c "CREATE DATABASE praktikum_backend;"
-```
-
-Jika perintah `psql` tidak ditemukan, berarti PostgreSQL belum terpasang atau belum ditambahkan ke PATH sistem(instal dulu PostgreSQL sesuai OS kamu sebelum lanjut).
-
-**2. Jalankan berkas migrasi untuk membuat tabel**
-
-```bash
-psql -U postgres -d praktikum_backend -f migrations/001_create_students.sql
-```
-
-**3. Pastikan tabel dan indeksnya benar-benar terbuat**
-
-```bash
-psql -U postgres -d praktikum_backend -c "\d students"
-```
-Nanti akan muncul daftar kolom `id, nim, name, grade, is_active, created_at`, beserta dua indeks (`students_nim_key` dan `students_name_lower_idx`) di bagian bawah output.
-
-**4. Siapkan berkas `.env`**
-
-Salin `.env.example` menjadi `.env`, lalu isi nilainya sesuai PostgreSQL di komputermu:
-
-```bash
-cp .env.example .env
-```
-
-Buka `.env` dan isi minimal `DB_PASSWORD` dengan kata sandi PostgreSQL. Lihat bagian **Variabel Environment** di bawah untuk penjelasan tiap nilainya.
-
-**5. Pasang dependensi Go dan jalankan aplikasi**
-
-```bash
-go mod tidy
-go run .
-```
-
-Jika semua langkah di atas benar, akan muncul:
-```
-Server berjalan di http://localhost:3000
-```
-
-**6. Verifikasi database sudah tersambung**
-
-```bash
-curl -i http://localhost:3000/api/v1/health
-```
-
-Respons `200 OK` dengan pesan `"server dan database berjalan"` berarti setup sudah benar. Kalau muncul `503`, cek kembali apakah PostgreSQL sedang menyala dan nilai di `.env` sudah sesuai.
+## 📌 Teknologi & Stack Utama
+- **Bahasa**: Go 1.26+
+- **Framework Web**: Fiber v2
+- **Database Driver**: PostgreSQL (`pgx/v5` dengan `pgxpool`)
+- **Autentikasi**: JWT (Bearer Token)
+- **Hasi Password**: `golang.org/x/crypto/bcrypt`
+- **Validasi**: `go-playground/validator/v10`
+- **Arsitektur**: Clean Architecture (`Model` -> `Repository` -> `Service` -> `Route/Handler`)
 
 ---
 
-## Variabel Environment
+## 📁 Struktur Folder Utama
+```text
+.
+├── app
+│   ├── model          # Struct domain data & DTO request/response
+│   ├── repository     # Query ke database PostgreSQL via pgx v5
+│   └── service        # Business logic, aturan domain, & transaksi
+├── cmd
+│   └── seeder         # Executable script seeder data awal
+├── config             # Konfigurasi aplikasi, env, logger, error handler
+├── database           # Connection pool PostgreSQL
+├── docs               # Postman collection & file pengujian HTTP
+├── helper             # JWT manager, password hashing, validator, response helper
+├── middleware         # Auth JWT, Role authorization, JSON, rate limiter
+├── migrations         # File SQL migrasi database (up & down)
+├── route              # Registrasi endpoint Fiber
+├── main.go            # Entry point aplikasi
+└── README.md          # Dokumentasi proyek
+```
 
-Seluruh variabel berikut didefinisikan di `.env.example` (tanpa nilai) dan wajib diisi di `.env` milikmu sendiri (berkas ini tidak ikut ter-commit ke Git, sesuai `.gitignore`).
+---
 
-| Variabel | Wajib diisi | Nilai bawaan bila kosong | Keterangan |
-|---|---|---|---|
-| `APP_PORT` | Tidak | `3000` | Port tempat server Fiber berjalan |
-| `DB_HOST` | Tidak | `localhost` | Alamat server PostgreSQL |
-| `DB_PORT` | Tidak | `5432` | Port PostgreSQL |
-| `DB_USER` | Tidak | `postgres` | Username untuk login ke PostgreSQL |
-| `DB_PASSWORD` | **Ya** | kosong | Kata sandi PostgreSQL — wajib diisi sesuai instalasi masing-masing |
-| `DB_NAME` | Tidak | `backend` | Nama database. |
-| `DB_SSLMODE` | Tidak | `disable` | Mode SSL koneksi. `disable` untuk lokal|
-| `DB_MAX_CONNS` | Tidak | `10` | Jumlah maksimum koneksi dalam connection pool |
+## 🚀 Setup & Panduan Menjalankan
 
-Contoh isi `.env` yang lengkap untuk pengembangan lokal:
-
+### 1. Konfigurasi Environment Variable (`.env`)
+Salin `.env.example` ke `.env` dan atur kredensial database & JWT:
 ```env
 APP_PORT=3000
+APP_ENV=development
 
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
-DB_PASSWORD=kata_sandi_anda
-DB_NAME=praktikum_backend
+DB_PASSWORD=123456
+DB_NAME=siakad
 DB_SSLMODE=disable
 DB_MAX_CONNS=10
+
+JWT_SECRET=super_secret_jwt_key_that_is_at_least_32_chars_long
+JWT_ISSUER=siakad-api
+JWT_ACCESS_TTL_MINUTES=1440
+```
+
+### 2. Jalankan Migrasi Database
+Jalankan file SQL migrasi di folder `migrations/` pada database PostgreSQL Anda:
+```bash
+psql -U postgres -d siakad -f migrations/008_siakad_schema.sql
+```
+
+### 3. Jalankan Seeder
+Seeder bersifat **idempotent** (`ON CONFLICT DO NOTHING / UPDATE`) dan dapat dijalankan berulang tanpa duplikasi data:
+```bash
+go run ./cmd/seeder
+```
+
+### 4. Jalankan Server
+```bash
+go run main.go
 ```
 
 ---
 
-## Entitas Student
+## 👥 Akun Seed
 
-| Field | Tipe | Keterangan |
-|---|---|---|
-| `id` | int | Penanda internal, dibuat otomatis oleh server, tidak bisa diubah klien |
-| `nim` | string | Penanda unik, wajib saat membuat data, tidak bisa diubah lewat PUT/PATCH |
-| `name` | string | Nama mahasiswa |
-| `grade` | float | Nilai, rentang 0–100 |
-| `is_active` | bool | Status keaktifan mahasiswa |
+### Admin
+- **Email**: `admin@siakad.test`
+- **Password**: `admin12345`
 
----
-
-## Daftar Endpoint
-
-### 1. GET `/students` — Daftar mahasiswa
-
-Mendukung paginasi, pencarian, pengurutan, dan penyaringan lewat query string.
-
-| Parameter | Tipe | Bawaan | Keterangan |
-|---|---|---|---|
-| `page` | int | `1` | Halaman keberapa |
-| `limit` | int | `10` | Baris per halaman, batas atas `100` |
-| `search` | string | kosong | Cari pada `name`, tidak case-sensitive |
-| `sort` | string | `id` | Kolom pengurutan, whitelist: `id`, `name`, `grade`, `nim` |
-| `order` | string | `asc` | `asc` atau `desc` |
-| `is_active` | bool | tidak menyaring | Saring berdasarkan status aktif |
-| `min_grade` | float | tidak menyaring | Batas bawah nilai |
-| `max_grade` | float | tidak menyaring | Batas atas nilai |
-
-**Contoh request dengan terminal Powershell** 
-```
-curl.exe -i -X GET "localhost:3000/api/v1/students?page=1&limit=2&sort=grade&order=desc&is_active=true&min_grade=70"
-```
-
-**Contoh respons — 200 OK**
-```json
-{
-  "success": true,
-  "message": "daftar mahasiswa berhasil diambil",
-  "data": [
-    { "id": 1, "nim": "2023010001", "name": "Sari Melati", "grade": 85, "is_active": true }
-  ],
-  "meta": { "page": 1, "limit": 2, "total": 1, "total_pages": 1 }
-}
-```
+### Mahasiswa (20 Mahasiswa)
+- **Password Awal**: Sama dengan **NIM** masing-masing.
+- Contoh akun mahasiswa seed:
+  - `mhs01@siakad.test` | NIM: `202401000001` | IPK: `3.75` (Maks 24 SKS)
+  - `mhs03@siakad.test` | NIM: `202401000003` | IPK: `2.85` (Maks 21 SKS)
+  - `mhs05@siakad.test` | NIM: `202401000005` | IPK: `2.30` (Maks 18 SKS)
 
 ---
 
-### 2. GET `/students/:id` — Ambil satu mahasiswa
+## 📋 Daftar 10 Endpoint API (Prefix `/api/v1`)
 
-| Path Parameter | Tipe | Keterangan |
-|---|---|---|
-| `id` | int | ID internal mahasiswa |
-
-
-**Contoh request dengan terminal Powershell**
-```
-curl.exe -i -X GET "localhost:3000/api/v1/students/1"
-```
-
-
-**Contoh respons — 200 OK**
-```json
-{
-  "success": true,
-  "message": "mahasiswa ditemukan",
-  "data": { "id": 1, "nim": "2023010001", "name": "Sari Melati", "grade": 85, "is_active": true }
-}
-```
-
-**Status yang mungkin**
-
-| Status | Situasi |
-|---|---|
-| 200 | Data ditemukan |
-| 400 | `id` bukan angka positif |
-| 404 | `id` tidak ada di data |
-
-**Contoh respons — 404 Not Found**
-```json
-{ "success": false, "message": "mahasiswa tidak ditemukan" }
-```
+| No | Method | Endpoint | Akses / Role | Deskripsi & Status Sukses |
+|---|---|---|---|---|
+| 1 | `POST` | `/api/v1/auth/login` | Publik | Login pengguna (Email & Password), mengembalikan Bearer JWT. (Status `200`) |
+| 2 | `GET` | `/api/v1/auth/me` | Authenticated (Semua Role) | Mengembalikan profil pengguna login. Jika mahasiswa, menyertakan NIM, nama, prodi, angkatan. (Status `200`) |
+| 3 | `GET` | `/api/v1/students` | Admin | Daftar mahasiswa dengan pagination, filter (`prodi`, `angkatan`), `search` (NIM/nama ILIKE), `sort` (`nama` atau `-ipk_terakhir`). (Status `200`) |
+| 4 | `POST` | `/api/v1/students` | Admin | Menambah mahasiswa + akun user dalam 1 DB transaction. Password awal = NIM (hash bcrypt). (Status `201`) |
+| 5 | `GET` | `/api/v1/students/{id}` | Admin / Mahasiswa (sendiri) | Detail mahasiswa + daftar mata kuliah yang diambil + `total_sks` + `batas_sks`. (Status `200`) |
+| 6 | `PUT` | `/api/v1/students/{id}` | Admin | Memperbarui `nama`, `prodi`, `angkatan`, `ipk_terakhir` (NIM tidak boleh diubah). (Status `200`) |
+| 7 | `DELETE` | `/api/v1/students/{id}` | Admin | Soft delete mahasiswa (`deleted_at`). Mahasiswa terhapus tidak bisa login. (Status `204`) |
+| 8 | `GET` | `/api/v1/courses` | Authenticated (Semua Role) | Daftar mata kuliah + kalkulasi `terisi` & `sisa_kuota`. Filter: `semester`, `search`, `available=true`. (Status `200`) |
+| 9 | `POST` | `/api/v1/enrollments` | Mahasiswa | Mengambil KRS (Mata Kuliah) dalam 1 DB transaction dengan `FOR UPDATE` row locking. (Status `201`) |
+| 10 | `DELETE` | `/api/v1/enrollments/{id}` | Mahasiswa (milik sendiri) | Membatalkan pengambilan mata kuliah dari KRS. (Status `204`) |
 
 ---
 
-### 3. POST `/students` — Tambah mahasiswa baru
-
-Seluruh field wajib dikirim. `is_active` otomatis diset `true` oleh server.
-
-**Contoh body request**
-```json
-{ "nim": "2023010001", "name": "Sari Melati", "grade": 85 }
-```
-
-**Contoh respons — 201 Created**
-
-Header tambahan: `Location: /api/v1/students/1`
-
-```json
-{
-  "success": true,
-  "message": "mahasiswa berhasil dibuat",
-  "data": { "id": 1, "nim": "2023010001", "name": "Sari Melati", "grade": 85, "is_active": true }
-}
-```
-
-**Status yang mungkin**
-
-| Status | Situasi |
-|---|---|
-| 201 | Berhasil dibuat |
-| 400 | Body bukan JSON yang valid |
-| 409 | `nim` sudah terdaftar |
-| 415 | `Content-Type` bukan `application/json` |
-| 422 | Field kosong atau `grade` di luar rentang 0–100 |
-
-**Contoh respons — 409 Conflict**
-```json
-{ "success": false, "message": "NIM sudah terdaftar" }
-```
-
-**Contoh respons — 422 Unprocessable Entity**
-```json
-{ "success": false, "message": "validasi gagal", "errors": { "grade": "harus di antara 0 dan 100" } }
-```
+## ⚙️ Aturan Bisnis (Business Rules)
+1. **Batas SKS (MaxSKS)**:
+   - IPK $\ge$ 3.00 $\rightarrow$ Maksimal **24 SKS**
+   - IPK 2.50 – 2.99 $\rightarrow$ Maksimal **21 SKS**
+   - IPK < 2.50 $\rightarrow$ Maksimal **18 SKS**
+2. **Pengambilan Ganda**: Mahasiswa tidak boleh mengambil mata kuliah yang sama lebih dari sekali pada `tahun_akademik` yang sama.
+3. **Kuota Mata Kuliah**: Mata kuliah dengan kuota penuh (`terisi >= kuota`) tidak boleh diambil. Dilengkapi `SELECT ... FOR UPDATE` row locking untuk mencegah race condition.
+4. **Otorisasi Kepemilikan**: Mahasiswa hanya boleh melihat dan mengelola KRS/data milik sendiri.
 
 ---
 
-### 4. PUT `/students/:id` — Ganti seluruh data
+## 🧪 Pengujian (Testing)
 
-Semua field wajib dikirim. Field yang tidak dikirim dianggap dikosongkan/direset — bukan dibiarkan seperti semula. `nim` tidak bisa diubah lewat endpoint ini.
-
-**Contoh body permintaan**
-```json
-{ "name": "Sari Melati Putri", "grade": 95, "is_active": false }
+### 1. Jalankan Unit Test
+```bash
+go test -v ./app/service/...
 ```
 
-**Contoh respons — 200 OK**
-```json
-{
-  "success": true,
-  "message": "mahasiswa berhasil diganti seluruhnya",
-  "data": { "id": 1, "nim": "2023010001", "name": "Sari Melati Putri", "grade": 95, "is_active": false }
-}
+### 2. Static Code Check & Build Verification
+```bash
+go vet ./...
+go build ./...
 ```
 
-**Status yang mungkin**
-
-| Status | Situasi |
-|---|---|
-| 200 | Berhasil diganti |
-| 400 | `id` bukan angka, atau body bukan JSON valid |
-| 404 | Data tidak ditemukan |
-| 415 | `Content-Type` bukan `application/json` |
-| 422 | Field wajib kosong, atau `grade` di luar rentang |
-
----
-
-### 5. PATCH `/students/:id` — Ubah sebagian data
-
-Hanya field yang dikirim yang berubah. Field lain dibiarkan seperti semula. `nim` tidak bisa diubah lewat endpoint ini.
-
-**Contoh body permintaan**
-```json
-{ "is_active": true }
-```
-
-**Contoh respons — 200 OK**
-```json
-{
-  "success": true,
-  "message": "mahasiswa berhasil diperbarui sebagian",
-  "data": { "id": 1, "nim": "2023010001", "name": "Sari Melati Putri", "grade": 95, "is_active": true }
-}
-```
-
-**Status yang mungkin**
-
-| Status | Situasi |
-|---|---|
-| 200 | Berhasil diperbarui |
-| 400 | `id` bukan angka, body bukan JSON valid, atau tidak ada field dikirim sama sekali |
-| 404 | Data tidak ditemukan |
-| 415 | `Content-Type` bukan `application/json` |
-| 422 | Field yang dikirim tidak lolos validasi (misal `grade` di luar rentang) |
-
----
-
-### 6. DELETE `/students/:id` — Hapus mahasiswa
-
-**Contoh respons — 204 No Content**
-
-Tanpa body.
-
-**Status yang mungkin**
-
-| Status | Situasi |
-|---|---|
-| 204 | Berhasil dihapus |
-| 400 | `id` bukan angka positif |
-| 404 | Data tidak ditemukan (termasuk saat mengulang DELETE ke id yang sama) |
-
----
-
-## Ringkasan Status HTTP yang Dipakai
-
-| Status | Dipakai pada |
-|---|---|
-| 200 OK | GET (satu/daftar), PUT, PATCH berhasil |
-| 201 Created | POST berhasil, disertai header `Location` |
-| 204 No Content | DELETE berhasil |
-| 400 Bad Request | `id` bukan angka, body bukan JSON valid, PATCH tanpa field |
-| 404 Not Found | Data dengan `id` yang diminta tidak ada |
-| 409 Conflict | `nim` yang dikirim sudah dipakai mahasiswa lain |
-| 415 Unsupported Media Type | `Content-Type` bukan `application/json` pada POST/PUT/PATCH |
-| 422 Unprocessable Entity | Bentuk data dipahami tetapi isinya tidak lolos validasi |
-
+### 3. File Postman & HTTP Request
+- Postman Collection: `docs/SIAKAD_Mini_API.postman_collection.json`
+- File HTTP Client: `docs/siakad_mini.http`
