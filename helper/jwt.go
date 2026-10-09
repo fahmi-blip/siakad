@@ -16,12 +16,9 @@ var (
 	ErrExpiredToken = errors.New("token sudah kedaluwarsa")
 )
 
-// accessClaims adalah isi access token. Selain field bawaan JWT,
-// ditambahkan username dan role agar middleware tidak perlu
-// menanyakannya ke database pada setiap request.
 type accessClaims struct {
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -37,12 +34,11 @@ func NewJWTManager(secret, issuer string, accessTTL time.Duration) *JWTManager {
 
 func (m *JWTManager) AccessTTL() time.Duration { return m.accessTTL }
 
-// GenerateAccess membuat access token berumur pendek.
 func (m *JWTManager) GenerateAccess(u model.User) (string, error) {
 	now := time.Now()
 	claims := accessClaims{
-		Username: u.Username,
-		Role:     u.Role,
+		Email: u.Email,
+		Role:  u.Role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   strconv.Itoa(u.ID),
 			Issuer:    m.issuer,
@@ -54,8 +50,6 @@ func (m *JWTManager) GenerateAccess(u model.User) (string, error) {
 	return token.SignedString(m.secret)
 }
 
-// Parse memeriksa tanda tangan dan masa berlaku token,
-// lalu mengembalikan identitas yang dibawanya.
 func (m *JWTManager) Parse(tokenString string) (model.AuthUser, error) {
 	claims := &accessClaims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims,
@@ -84,8 +78,8 @@ func (m *JWTManager) Parse(tokenString string) (model.AuthUser, error) {
 	}
 
 	return model.AuthUser{
-		UserID:   userID,
-		Username: claims.Username,
-		Role:     claims.Role,
+		UserID: userID,
+		Email:  claims.Email,
+		Role:   claims.Role,
 	}, nil
 }

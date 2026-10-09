@@ -9,12 +9,6 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// validate dibuat SEKALI untuk seluruh aplikasi.
-//
-// validator.New() melakukan refleksi dan menyimpan hasilnya dalam cache
-// internal. Membuatnya ulang pada setiap request berarti membuang cache
-// tersebut berkali-kali — mahal dan tidak ada gunanya.
-
 var validate = newValidator()
 
 func passwordStrength(password string) string {
@@ -49,8 +43,6 @@ func passwordStrength(password string) string {
 func newValidator() *validator.Validate {
 	v := validator.New()
 
-	// Tanpa ini, pesan error menyebut nama field Go ("Username"),
-	// padahal client mengirim dan membaca nama JSON ("username").
 	v.RegisterTagNameFunc(func(field reflect.StructField) string {
 		name := strings.SplitN(field.Tag.Get("json"), ",", 2)[0]
 		if name == "" || name == "-" {
@@ -58,9 +50,7 @@ func newValidator() *validator.Validate {
 		}
 		return name
 	})
-	// Aturan buatan sendiri. Aturan yang tidak disediakan library tetap
-	// ditulis secara deklaratif sebagai tag, bukan dikembalikan menjadi
-	// pemeriksaan manual yang tersebar di dalam service.
+
 	_ = v.RegisterValidation("nospace", func(fl validator.FieldLevel) bool {
 		return !strings.ContainsAny(fl.Field().String(), " \t\n\r")
 	})
@@ -78,7 +68,7 @@ func newValidator() *validator.Validate {
 	})
 	_ = v.RegisterValidation("nim", func(fl validator.FieldLevel) bool {
 		val := fl.Field().String()
-		if len(val) < 9 || len(val) > 18 {
+		if len(val) != 12 {
 			return false
 		}
 		for _, r := range val {
@@ -91,40 +81,30 @@ func newValidator() *validator.Validate {
 	return v
 }
 
-// ValidateStruct menjalankan seluruh aturan pada tag struct dan
-//  mengembalikan peta nama field ke pesan berbahasa Indonesia.
-// Mengembalikan nil berarti tidak ada pelanggaran.
-
-func ValidateStruct(s any) map[string]string {
+func ValidateStruct(s any) map[string][]string {
 	err := validate.Struct(s)
 	if err == nil {
 		return nil
 	}
 
-	// Terjadi bila yang dikirim bukan struct — itu kesalahan programmer,
-	// bukan kesalahan pemakai API. Jangan diam-diam dianggap valid.
 	var invalid *validator.InvalidValidationError
 	if errors.As(err, &invalid) {
-		return map[string]string{"_": "objek yang divalidasi tidak sah"}
+		return map[string][]string{"_": {"objek yang divalidasi tidak sah"}}
 	}
 
 	var fieldErrors validator.ValidationErrors
 	if !errors.As(err, &fieldErrors) {
-		return map[string]string{"_": "validasi gagal"}
+		return map[string][]string{"_": {"validasi gagal"}}
 	}
 
-	result := make(map[string]string, len(fieldErrors))
+	result := make(map[string][]string)
 	for _, fe := range fieldErrors {
-		if _, exists := result[fe.Field()]; !exists {
-			result[fe.Field()] = messageFor(fe)
-		}
+		field := fe.Field()
+		result[field] = append(result[field], messageFor(fe))
 	}
 	return result
 }
 
-// messageFor menerjemahkan nama tag menjadi kalimat yang dapat dibaca
-// pemakai. Daftar ini terpusat: menambah satu tag baru cukup menambah
-// satu case di sini, tidak menyebar ke banyak file.
 func messageFor(fe validator.FieldError) string {
 	switch fe.Tag() {
 	case "required":
@@ -141,6 +121,10 @@ func messageFor(fe validator.FieldError) string {
 			return "maksimal " + fe.Param() + " karakter"
 		}
 		return "nilai maksimal " + fe.Param()
+	case "len":
+		return "harus sepanjang " + fe.Param() + " karakter"
+	case "numeric":
+		return "harus berupa angka"
 	case "alphanum":
 		return "hanya boleh berisi huruf dan angka"
 	case "nospace":
@@ -148,11 +132,8 @@ func messageFor(fe validator.FieldError) string {
 	case "username":
 		return "hanya boleh huruf, angka, titik, dan garis bawah"
 	case "nim":
-		return "format NIM tidak valid (harus 9-18 digit angka)"
+		return "NIM harus 12 digit angka"
 	case "strongpassword":
-		// Type assertion memakai bentuk DUA nilai, bukan satu. Bentuk
-		// satu nilai akan panic bila suatu saat tag ini terpasang pada
-		// field bukan string — mematikan server hanya karena salah tag.
 		if value, ok := fe.Value().(string); ok {
 			return passwordStrength(value)
 		}
@@ -160,8 +141,6 @@ func messageFor(fe validator.FieldError) string {
 	case "oneof":
 		return "harus salah satu dari: " + strings.ReplaceAll(fe.Param(), " ", ", ")
 	default:
-		// Jaring pengaman. Bila muncul di log, artinya ada tag yang
-		// dipakai tetapi belum diterjemahkan di sini.
 		return "tidak memenuhi aturan " + fe.Tag()
 	}
 }

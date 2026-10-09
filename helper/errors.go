@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -20,11 +21,11 @@ const (
 )
 
 type AppError struct {
-	Status  int               // status HTTP yang akan dikirim
-	Code    string            // kode stabil untuk client
-	Message string            // penjelasan untuk manusia
-	Fields  map[string]string // detail per-field, khusus kegagalan validasi
-	cause   error             // error asli, untuk log — tidak pernah dikirim
+	Status  int                 // status HTTP yang akan dikirim
+	Code    string              // kode stabil untuk client
+	Message string              // penjelasan untuk manusia
+	Fields  map[string][]string // detail per-field, khusus kegagalan validasi
+	cause   error               // error asli, untuk log — tidak pernah dikirim
 }
 
 func (e *AppError) Error() string {
@@ -34,8 +35,6 @@ func (e *AppError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-// Unwrap membuat errors.Is dan errors.As tetap dapat menembus AppError
-// untuk menemukan error asli di bawahnya.
 func (e *AppError) Unwrap() error {
 	return e.cause
 }
@@ -60,8 +59,8 @@ func Conflict(message string) *AppError {
 	return &AppError{Status: fiber.StatusConflict, Code: CodeConflict, Message: message}
 }
 
-func Validation(fields map[string]string) *AppError {
-	return &AppError{Status: fiber.StatusUnprocessableEntity, Code: CodeValidation, Message: "validasi gagal", Fields: fields}
+func Validation(fields map[string][]string) *AppError {
+	return &AppError{Status: fiber.StatusUnprocessableEntity, Code: CodeValidation, Message: "Validasi gagal", Fields: fields}
 }
 
 func NotAcceptable(message string) *AppError {
@@ -75,6 +74,7 @@ func UnsupportedMediaType(message string) *AppError {
 func TooManyRequests(message string) *AppError {
 	return &AppError{Status: fiber.StatusTooManyRequests, Code: CodeTooManyRequests, Message: message}
 }
+
 func ServiceUnavailable(message string) *AppError {
 	return &AppError{Status: fiber.StatusServiceUnavailable, Code: CodeServiceUnavailable, Message: message}
 }
@@ -82,10 +82,6 @@ func ServiceUnavailable(message string) *AppError {
 func (e *AppError) Cause() error {
 	return e.cause
 }
-
-// Internal sengaja memakai pesan yang seragam dan tidak informatif.
-// Detail teknisnya disimpan pada cause dan hanya muncul di log, karena
-// pesan error database sering membocorkan nama tabel dan struktur query.
 
 func Internal(cause error) *AppError {
 	return &AppError{Status: fiber.StatusInternalServerError, Code: CodeInternal, Message: "terjadi kesalahan pada server", cause: cause}

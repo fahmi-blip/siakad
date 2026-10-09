@@ -2,7 +2,6 @@ package helper
 
 import (
 	"encoding/csv"
-
 	"strconv"
 	"strings"
 
@@ -16,15 +15,8 @@ const (
 	FormatCSV  = "text/csv"
 )
 
-// Negotiate memilih format response berdasarkan header Accept.
-// //
-// Perbedaan yang wajib jelas:
-// - Content-Type menjelaskan format yang SEDANG DIKIRIM pengirim.
-// - Accept menjelaskan format yang DIINGINKAN penerima sebagai balasan.
 func Negotiate(c *fiber.Ctx, offered ...string) (string, error) {
 	accept := strings.TrimSpace(c.Get(fiber.HeaderAccept))
-	// Tidak menyebut Accept sama sekali berarti "terserah server".
-	// Demikian pula Accept: */* yang dikirim hampir semua tool CLI.
 	if accept == "" {
 		return offered[0], nil
 	}
@@ -37,24 +29,20 @@ func Negotiate(c *fiber.Ctx, offered ...string) (string, error) {
 	return chosen, nil
 }
 
-// WriteUsersCSV menuliskan daftar user sebagai CSV. //
-// Header Content-Disposition membuat browser menawarkan unduhan alih-alih
-// menampilkan isinya sebagai teks mentah.
 func WriteUsersCSV(c *fiber.Ctx, users []model.User) error {
 	c.Set(fiber.HeaderContentType, FormatCSV+"; charset=utf-8")
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="users.csv"`)
 	var buffer strings.Builder
 	writer := csv.NewWriter(&buffer)
 
-	header := []string{"id", "username", "email", "role", "is_active", "created_at"}
+	header := []string{"id", "email", "role", "created_at"}
 	if err := writer.Write(header); err != nil {
 		return Internal(err)
 	}
 
 	for _, u := range users {
 		row := []string{
-			strconv.Itoa(u.ID), u.Username, u.Email, u.Role,
-			strconv.FormatBool(u.IsActive),
+			strconv.Itoa(u.ID), u.Email, u.Role,
 			u.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		}
 		if err := writer.Write(row); err != nil {
@@ -75,17 +63,18 @@ func WriteStudentsCSV(c *fiber.Ctx, students []model.Student) error {
 	var buffer strings.Builder
 	writer := csv.NewWriter(&buffer)
 
-	if err := writer.Write([]string{"id", "nim", "name", "grade", "is_active", "owner_id", "created_at"}); err != nil {
+	if err := writer.Write([]string{"id", "user_id", "nim", "nama", "prodi", "angkatan", "ipk_terakhir", "created_at"}); err != nil {
 		return Internal(err)
 	}
 	for _, student := range students {
 		if err := writer.Write([]string{
 			strconv.Itoa(student.ID),
+			strconv.Itoa(student.UserID),
 			student.Nim,
-			student.Name,
-			strconv.FormatFloat(student.Grade, 'f', -1, 64),
-			strconv.FormatBool(student.IsActive),
-			strconv.Itoa(student.OwnerID),
+			student.Nama,
+			student.Prodi,
+			strconv.Itoa(student.Angkatan),
+			strconv.FormatFloat(student.IpkTerakhir, 'f', 2, 64),
 			student.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		}); err != nil {
 			return Internal(err)
