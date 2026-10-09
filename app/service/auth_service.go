@@ -1,11 +1,8 @@
 package service
 
 import (
-	"context"
 	"errors"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -14,66 +11,22 @@ import (
 	"api-students/helper"
 )
 
-const refreshTokenBytes = 32
-
 type AuthService struct {
-	users      repository.UserRepository
-	tokens     repository.TokenRepository
-	jwt        *helper.JWTManager
-	refreshTTL time.Duration
+	users    repository.UserRepository
+	students repository.StudentRepository
+	jwt      *helper.JWTManager
 }
 
 func NewAuthService(
 	users repository.UserRepository,
-	tokens repository.TokenRepository,
+	students repository.StudentRepository,
 	jwtManager *helper.JWTManager,
-	refreshTTL time.Duration,
 ) *AuthService {
 	return &AuthService{
-		users: users, tokens: tokens, jwt: jwtManager, refreshTTL: refreshTTL,
+		users:    users,
+		students: students,
+		jwt:      jwtManager,
 	}
-}
-
-func (s *AuthService) Register(c *fiber.Ctx) error {
-	ctx, cancel := helper.ReqCtx(c)
-	defer cancel()
-
-	var req model.RegisterRequest
-	if err := c.BodyParser(&req); err != nil {
-		return helper.BadRequest("body harus berupa JSON yang valid")
-	}
-
-	req.Username = strings.TrimSpace(req.Username)
-	req.Email = strings.TrimSpace(req.Email)
-
-	if errs := helper.ValidateStruct(req); len(errs) > 0 {
-		return helper.Validation(errs)
-	}
-
-	// Password DI-HASH sebelum menyentuh database. Nilai aslinya tidak
-	// pernah disimpan, tidak pernah di-log, dan tidak pernah dikirim balik.
-	hashed, err := helper.HashPassword(req.Password)
-	if err != nil {
-		return helper.Internal(err)
-	}
-
-	// Role selalu ditentukan server, tidak pernah diambil dari request.
-	created, err := s.users.Create(ctx, model.User{
-		Username: req.Username,
-		Email:    req.Email,
-		Password: hashed,
-		Role:     "user",
-		IsActive: true,
-	})
-	if err != nil {
-		if errors.Is(err, repository.ErrDuplicate) {
-			return helper.Conflict("username atau email sudah dipakai")
-		}
-		return helper.Internal(err)
-	}
-
-	return helper.Created(c, "pendaftaran berhasil", created,
-		"/api/v1/users/"+strconv.Itoa(created.ID))
 }
 
 func (s *AuthService) Login(c *fiber.Ctx) error {
@@ -85,89 +38,51 @@ func (s *AuthService) Login(c *fiber.Ctx) error {
 		return helper.BadRequest("body harus berupa JSON yang valid")
 	}
 
+	req.Email = strings.TrimSpace(req.Email)
+
 	if errs := helper.ValidateStruct(req); len(errs) > 0 {
 		return helper.Validation(errs)
 	}
 
-	user, err := s.users.FindByUsername(ctx, strings.TrimSpace(req.Username))
+	user, err := s.users.FindByEmail(ctx, req.Email)
 	if err != nil {
-		// Username tidak ditemukan. Tetap jalankan pemeriksaan palsu agar
-		// waktu tanggapnya mirip dengan kasus password salah, lalu jawab
-		// dengan pesan yang SAMA PERSIS. Membedakan keduanya sama saja
-		// dengan memberi tahu penyerang username mana yang terdaftar.
 		helper.VerifyDummyPassword(req.Password)
-		return helper.Unauthorized("username atau password salah")
+		return helper.Unauthorized("kredensial salah")
 	}
 
 	if !helper.VerifyPassword(user.Password, req.Password) {
-		return helper.Unauthorized("username atau password salah")
+		return helper.Unauthorized("kredensial salah")
 	}
 
-	if !user.IsActive {
-		return helper.Forbidden("akun dinonaktifkan")
+	// Mahasiswa yang sudah soft delete TIDAK boleh bisa login
+	if user.Role == "mahasiswa" {
+		student, err := s.students.FindByUserID(ctx, user.ID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return helper.Unauthorized("kredensial salah")
+			}
+			return helper.Internal(err)
+		}
+		_ = student
 	}
 
-	pair, err := s.issueTokenPair(ctx, user)
+	token, err := s.jwt.GenerateAccess(user)
 	if err != nil {
 		return helper.Internal(err)
 	}
 
-	return helper.Ok(c, fiber.StatusOK, "login berhasil", pair)
-}
-
-func (s *AuthService) Refresh(c *fiber.Ctx) error {
-	ctx, cancel := helper.ReqCtx(c)
-	defer cancel()
-
-	var req model.RefreshRequest
-	if err := c.BodyParser(&req); err != nil {
-		return helper.BadRequest("body harus berupa JSON yang valid")
-	}
-	if strings.TrimSpace(req.RefreshToken) == "" {
-		return helper.BadRequest("refresh_token wajib diisi")
+	resp := model.LoginResponse{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		ExpiresIn:   int(s.jwt.AccessTTL().Seconds()),
+		User: model.AuthUserInfo{
+			ID:    user.ID,
+			Email: user.Email,
+			Role:  user.Role,
+		},
 	}
 
-	hash := helper.SHA256Hex(req.RefreshToken)
-	stored, err := s.tokens.FindActive(ctx, hash)
-	if err != nil {
-		return helper.Unauthorized("refresh token tidak valid atau sudah kedaluwarsa")
-	}
-
-	user, err := s.users.FindByID(ctx, stored.UserID)
-	if err != nil || !user.IsActive {
-		return helper.Unauthorized("akun tidak dapat dipakai")
-	}
-
-	// ROTASI: token lama langsung dicabut dan diganti yang baru.
-	// Bila token lama sempat dicuri, ia hanya berguna sekali.
-	if err := s.tokens.Revoke(ctx, hash); err != nil {
-		return helper.Internal(err)
-	}
-
-	pair, err := s.issueTokenPair(ctx, user)
-	if err != nil {
-		return helper.Internal(err)
-	}
-
-	return helper.Ok(c, fiber.StatusOK, "token berhasil diperbarui", pair)
-}
-
-func (s *AuthService) Logout(c *fiber.Ctx) error {
-	ctx, cancel := helper.ReqCtx(c)
-	defer cancel()
-
-	var req model.RefreshRequest
-	if err := c.BodyParser(&req); err != nil {
-		return helper.BadRequest("body harus berupa JSON yang valid")
-	}
-
-	if strings.TrimSpace(req.RefreshToken) != "" {
-		// Kegagalan mencabut tidak dilaporkan sebagai error ke client:
-		// dari sudut pandang pemakai, logout harus selalu berhasil.
-		_ = s.tokens.Revoke(ctx, helper.SHA256Hex(req.RefreshToken))
-	}
-
-	return helper.Ok(c, fiber.StatusOK, "logout berhasil", nil)
+	return helper.Ok(c, fiber.StatusOK, "login berhasil", resp)
 }
 
 func (s *AuthService) Me(c *fiber.Ctx) error {
@@ -184,37 +99,26 @@ func (s *AuthService) Me(c *fiber.Ctx) error {
 		return helper.Unauthorized("user tidak ditemukan")
 	}
 
-	return helper.Ok(c, fiber.StatusOK, "profil berhasil diambil", user)
-}
-
-// issueTokenPair membuat access token dan refresh token sekaligus.
-func (s *AuthService) issueTokenPair(
-	ctx context.Context, user model.User,
-) (model.TokenPair, error) {
-	accessToken, err := s.jwt.GenerateAccess(user)
-	if err != nil {
-		return model.TokenPair{}, err
+	meResp := model.MeResponse{
+		ID:        user.ID,
+		Email:     user.Email,
+		Role:      user.Role,
+		CreatedAt: user.CreatedAt,
 	}
 
-	refreshToken, err := helper.RandomToken(refreshTokenBytes)
-	if err != nil {
-		return model.TokenPair{}, err
+	if user.Role == "mahasiswa" {
+		student, err := s.students.FindByUserID(ctx, user.ID)
+		if err == nil {
+			meResp.Student = &model.MeStudentData{
+				ID:          student.ID,
+				Nim:         student.Nim,
+				Nama:        student.Nama,
+				Prodi:       student.Prodi,
+				Angkatan:    student.Angkatan,
+				IpkTerakhir: student.IpkTerakhir,
+			}
+		}
 	}
 
-	// Yang disimpan hash-nya, bukan tokennya.
-	err = s.tokens.Save(ctx, model.RefreshToken{
-		UserID:    user.ID,
-		TokenHash: helper.SHA256Hex(refreshToken),
-		ExpiresAt: time.Now().Add(s.refreshTTL),
-	})
-	if err != nil {
-		return model.TokenPair{}, err
-	}
-
-	return model.TokenPair{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    int(s.jwt.AccessTTL().Seconds()),
-	}, nil
+	return helper.Ok(c, fiber.StatusOK, "profil berhasil diambil", meResp)
 }
