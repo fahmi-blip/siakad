@@ -1,32 +1,28 @@
 package config
 
 import (
-	"api-students/app/model"
-	"api-students/helper"
-	"api-students/middleware"
-	"api-students/route"
 	"errors"
 	"log/slog"
 
 	"github.com/gofiber/fiber/v2"
+
+	"api-students/helper"
+	"api-students/middleware"
+	"api-students/route"
 )
 
-// NewApp merakit aplikasi: membuat instance Fiber, memasang middleware,
-// lalu mendaftarkan route. File ini adalah tempat seluruh bagian bertemu.
 func NewApp(
 	logger *slog.Logger, deps route.Dependencies,
 ) *fiber.App {
 	app := fiber.New(fiber.Config{
-		AppName:      GetEnv("APP_NAME", "Praktikum Backend Lanjut"),
+		AppName:      GetEnv("APP_NAME", "SIAKAD Mini API"),
 		ErrorHandler: newErrorHandler(logger),
-
-		BodyLimit: 1 * 1024 * 1024,
+		BodyLimit:    1 * 1024 * 1024,
 	})
 
 	middleware.Register(app, logger, GetEnv("ALLOWED_ORIGINS", ""))
 	route.Register(app, deps)
 
-	// Penampung terakhir untuk URL yang tidak dikenal.
 	app.Use(func(c *fiber.Ctx) error {
 		return helper.NotFound("endpoint tidak ditemukan")
 	})
@@ -34,8 +30,6 @@ func NewApp(
 	return app
 }
 
-// newErrorHandler adalah jaring pengaman terakhir: error yang tidak
-// tertangani di service berakhir di sini dengan format yang tetap konsisten.
 func newErrorHandler(logger *slog.Logger) fiber.ErrorHandler {
 	return func(c *fiber.Ctx, err error) error {
 		requestID, _ := c.Locals("requestid").(string)
@@ -64,6 +58,7 @@ func newErrorHandler(logger *slog.Logger) fiber.ErrorHandler {
 				appErr = helper.Internal(err)
 			}
 		}
+
 		if appErr.Status >= fiber.StatusInternalServerError {
 			logger.Error("request_failed",
 				slog.String("request_id", requestID),
@@ -71,6 +66,10 @@ func newErrorHandler(logger *slog.Logger) fiber.ErrorHandler {
 				slog.String("code", appErr.Code),
 				slog.Int("status", appErr.Status),
 				slog.String("error", appErr.Error()))
+
+			if GetEnv("APP_ENV", "development") == "production" {
+				appErr.Message = "Terjadi kesalahan pada server"
+			}
 		} else {
 			logger.Warn("request_rejected",
 				slog.String("request_id", requestID),
@@ -78,12 +77,18 @@ func newErrorHandler(logger *slog.Logger) fiber.ErrorHandler {
 				slog.String("code", appErr.Code),
 				slog.Int("status", appErr.Status))
 		}
-		return c.Status(appErr.Status).JSON(model.ErrorResponse{
-			Success:   false,
-			Code:      appErr.Code,
-			Message:   appErr.Message,
-			Fields:    appErr.Fields,
-			RequestID: requestID,
+
+		if len(appErr.Fields) > 0 {
+			return c.Status(appErr.Status).JSON(fiber.Map{
+				"success": false,
+				"message": appErr.Message,
+				"errors":  appErr.Fields,
+			})
+		}
+
+		return c.Status(appErr.Status).JSON(fiber.Map{
+			"success": false,
+			"message": appErr.Message,
 		})
 	}
 }
